@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Video Call</title>
+  <title>Video Call + Chat + Screen Share</title>
   <style>
     body {
       font-family: sans-serif;
@@ -21,6 +21,7 @@
     }
     #videos {
       display: flex;
+      flex-wrap: wrap;
     }
     #chat {
       width: 300px;
@@ -43,7 +44,7 @@
 </head>
 <body>
 
-<h2>🎥 Simple Video Call with Chat & Screen Sharing</h2>
+<h2></h2> dfhuhiuhiuhiuhiu Video Call with Chat & Screen Sharing</h2>
 
 <p>Your ID: <span id="my-id">...</span></p>
 <input id="peer-id" placeholder="Enter peer ID to call">
@@ -72,38 +73,64 @@
 
   let localStream;
   let currentCall;
-  const peer = new Peer();
-
-  peer.on('open', id => {
-    document.getElementById('my-id').textContent = id;
-  });
-
-  navigator.mediaDevices.getUserMedia({ video: true, audio: true })
-    .then(stream => {
-      localStream = stream;
-      myVideo.srcObject = stream;
-    });
-
-  peer.on('call', call => {
-    call.answer(localStream);
-    call.on('stream', remoteStream => {
-      peerVideo.srcObject = remoteStream;
-    });
-    currentCall = call;
-  });
-
-  peer.on('connection', conn => {
-    conn.on('data', data => {
-      addMessage('Peer: ' + data);
-    });
-  });
-
   let conn;
+  let peer;
+  let myCustomId;
+  const maxRetries = 5;
+
+  function createPeerWithRetry(retries = 0) {
+    myCustomId = Math.floor(1000 + Math.random() * 9000).toString();
+    peer = new Peer(myCustomId);
+
+    peer.on('open', id => {
+      document.getElementById('my-id').textContent = id;
+      console.log(`Connected with ID: ${id}`);
+      setupPeerEvents();
+    });
+
+    peer.on('error', err => {
+      if (err.type === 'unavailable-id' && retries < maxRetries) {
+        console.warn(`ID ${myCustomId} taken, retrying...`);
+        createPeerWithRetry(retries + 1);
+      } else {
+        alert('Failed to create peer. Please refresh the page.');
+        console.error(err);
+      }
+    });
+  }
+
+  function setupPeerEvents() {
+    navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+      .then(stream => {
+        localStream = stream;
+        myVideo.srcObject = stream;
+      });
+
+    peer.on('call', call => {
+      call.answer(localStream);
+      call.on('stream', remoteStream => {
+        peerVideo.srcObject = remoteStream;
+      });
+      currentCall = call;
+    });
+
+    peer.on('connection', incomingConn => {
+      conn = incomingConn;
+      conn.on('data', data => {
+        addMessage('Peer: ' + data);
+      });
+      conn.on('open', () => {
+        console.log('Data connection opened (incoming)');
+      });
+    });
+  }
 
   function callPeer() {
     const id = peerIdInput.value;
+
     conn = peer.connect(id);
     conn.on('open', () => {
+      console.log('Data connection opened (outgoing)');
       conn.on('data', data => {
         addMessage('Peer: ' + data);
       });
@@ -122,6 +149,8 @@
       conn.send(msg);
       addMessage('You: ' + msg);
       messageInput.value = '';
+    } else {
+      alert('Connection not established yet!');
     }
   }
 
@@ -148,6 +177,9 @@
         alert('Screen share failed: ' + err);
       });
   }
+
+  // Start everything
+  createPeerWithRetry();
 </script>
 
 </body>
