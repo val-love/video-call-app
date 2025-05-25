@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Video Call + Chat + Screen Share</title>
+  <title>Video Call</title>
   <style>
     body {
       font-family: sans-serif;
@@ -22,6 +22,8 @@
     #videos {
       display: flex;
       flex-wrap: wrap;
+      align-items: center;
+      justify-content: center;
     }
     #chat {
       width: 300px;
@@ -40,19 +42,31 @@
       flex-direction: column;
       align-items: flex-start;
     }
+    .username-label {
+      font-weight: bold;
+      margin-top: 0.5rem;
+    }
   </style>
 </head>
 <body>
 
-<h2></h2> dfhuhiuhiuhiuhiu Video Call with Chat & Screen Sharing</h2>
+<h2>🎥 Video Call with Chat, Screen Sharing & Username</h2>
 
 <p>Your ID: <span id="my-id">...</span></p>
+<p>Your Username: <span id="my-username">...</span></p>
+
 <input id="peer-id" placeholder="Enter peer ID to call">
 <button onclick="callPeer()">Call</button>
 
 <div id="videos">
-  <video id="my-video" autoplay muted></video>
-  <video id="peer-video" autoplay></video>
+  <div>
+    <div class="username-label">You</div>
+    <video id="my-video" autoplay muted></video>
+  </div>
+  <div>
+    <div class="username-label" id="peer-username">Peer</div>
+    <video id="peer-video" autoplay></video>
+  </div>
 </div>
 
 <div id="chat-box">
@@ -70,13 +84,25 @@
   const chatBox = document.getElementById('chat');
   const peerIdInput = document.getElementById('peer-id');
   const messageInput = document.getElementById('message');
+  const myUsernameDisplay = document.getElementById('my-username');
+  const peerUsernameDisplay = document.getElementById('peer-username');
 
   let localStream;
   let currentCall;
   let conn;
   let peer;
   let myCustomId;
+  let myUsername;
+  let peerUsername = "Peer";
   const maxRetries = 5;
+
+  // Ask for username on load
+  window.onload = () => {
+    myUsername = prompt("Enter your username:");
+    if (!myUsername) myUsername = "Anonymous";
+    myUsernameDisplay.textContent = myUsername;
+    createPeerWithRetry();
+  };
 
   function createPeerWithRetry(retries = 0) {
     myCustomId = Math.floor(1000 + Math.random() * 9000).toString();
@@ -116,11 +142,25 @@
 
     peer.on('connection', incomingConn => {
       conn = incomingConn;
-      conn.on('data', data => {
-        addMessage('Peer: ' + data);
-      });
+
       conn.on('open', () => {
         console.log('Data connection opened (incoming)');
+        // Send our username to the peer
+        conn.send(JSON.stringify({ type: "username", name: myUsername }));
+      });
+
+      conn.on('data', data => {
+        try {
+          const msg = JSON.parse(data);
+          if (msg.type === "username") {
+            peerUsername = msg.name;
+            peerUsernameDisplay.textContent = peerUsername;
+          } else if (msg.type === "chat") {
+            addMessage(`${peerUsername}: ${msg.text}`);
+          }
+        } catch (e) {
+          console.warn("Non-JSON data:", data);
+        }
       });
     });
   }
@@ -129,11 +169,24 @@
     const id = peerIdInput.value;
 
     conn = peer.connect(id);
+
     conn.on('open', () => {
       console.log('Data connection opened (outgoing)');
-      conn.on('data', data => {
-        addMessage('Peer: ' + data);
-      });
+      conn.send(JSON.stringify({ type: "username", name: myUsername }));
+    });
+
+    conn.on('data', data => {
+      try {
+        const msg = JSON.parse(data);
+        if (msg.type === "username") {
+          peerUsername = msg.name;
+          peerUsernameDisplay.textContent = peerUsername;
+        } else if (msg.type === "chat") {
+          addMessage(`${peerUsername}: ${msg.text}`);
+        }
+      } catch (e) {
+        console.warn("Non-JSON data:", data);
+      }
     });
 
     const call = peer.call(id, localStream);
@@ -146,8 +199,8 @@
   function sendMessage() {
     const msg = messageInput.value;
     if (conn && conn.open) {
-      conn.send(msg);
-      addMessage('You: ' + msg);
+      conn.send(JSON.stringify({ type: "chat", text: msg }));
+      addMessage(`You: ${msg}`);
       messageInput.value = '';
     } else {
       alert('Connection not established yet!');
@@ -177,9 +230,6 @@
         alert('Screen share failed: ' + err);
       });
   }
-
-  // Start everything
-  createPeerWithRetry();
 </script>
 
 </body>
