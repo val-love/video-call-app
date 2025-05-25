@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Video Call</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      margin: 0;
+      padding: 1rem;
+      background: #f2f2f2;
+    }
+    video {
+      width: 300px;
+      margin: 1rem;
+      border: 2px solid #333;
+      border-radius: 10px;
+    }
+    #videos {
+      display: flex;
+    }
+    #chat {
+      width: 300px;
+      max-height: 200px;
+      overflow-y: auto;
+      margin-top: 1rem;
+      background: white;
+      padding: 0.5rem;
+      border: 1px solid #ccc;
+    }
+    input, button {
+      margin: 0.5rem;
+    }
+    #chat-box {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+    }
+  </style>
+</head>
+<body>
+
+<h2>🎥 Simple Video Call with Chat & Screen Sharing</h2>
+
+<p>Your ID: <span id="my-id">...</span></p>
+<input id="peer-id" placeholder="Enter peer ID to call">
+<button onclick="callPeer()">Call</button>
+
+<div id="videos">
+  <video id="my-video" autoplay muted></video>
+  <video id="peer-video" autoplay></video>
+</div>
+
+<div id="chat-box">
+  <div id="chat"></div>
+  <input id="message" placeholder="Type a message">
+  <button onclick="sendMessage()">Send</button>
+</div>
+
+<button onclick="shareScreen()">Share Screen</button>
+
+<script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+<script>
+  const myVideo = document.getElementById('my-video');
+  const peerVideo = document.getElementById('peer-video');
+  const chatBox = document.getElementById('chat');
+  const peerIdInput = document.getElementById('peer-id');
+  const messageInput = document.getElementById('message');
+
+  let localStream;
+  let currentCall;
+  const peer = new Peer();
+
+  peer.on('open', id => {
+    document.getElementById('my-id').textContent = id;
+  });
+
+  navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+    .then(stream => {
+      localStream = stream;
+      myVideo.srcObject = stream;
+    });
+
+  peer.on('call', call => {
+    call.answer(localStream);
+    call.on('stream', remoteStream => {
+      peerVideo.srcObject = remoteStream;
+    });
+    currentCall = call;
+  });
+
+  peer.on('connection', conn => {
+    conn.on('data', data => {
+      addMessage('Peer: ' + data);
+    });
+  });
+
+  let conn;
+
+  function callPeer() {
+    const id = peerIdInput.value;
+    conn = peer.connect(id);
+    conn.on('open', () => {
+      conn.on('data', data => {
+        addMessage('Peer: ' + data);
+      });
+    });
+
+    const call = peer.call(id, localStream);
+    call.on('stream', remoteStream => {
+      peerVideo.srcObject = remoteStream;
+    });
+    currentCall = call;
+  }
+
+  function sendMessage() {
+    const msg = messageInput.value;
+    if (conn && conn.open) {
+      conn.send(msg);
+      addMessage('You: ' + msg);
+      messageInput.value = '';
+    }
+  }
+
+  function addMessage(msg) {
+    const div = document.createElement('div');
+    div.textContent = msg;
+    chatBox.appendChild(div);
+    chatBox.scrollTop = chatBox.scrollHeight;
+  }
+
+  function shareScreen() {
+    navigator.mediaDevices.getDisplayMedia({ video: true })
+      .then(screenStream => {
+        const screenTrack = screenStream.getVideoTracks()[0];
+        const sender = currentCall.peerConnection.getSenders().find(s => s.track.kind === 'video');
+        sender.replaceTrack(screenTrack);
+
+        screenTrack.onended = () => {
+          const videoTrack = localStream.getVideoTracks()[0];
+          sender.replaceTrack(videoTrack);
+        };
+      })
+      .catch(err => {
+        alert('Screen share failed: ' + err);
+      });
+  }
+</script>
+
+</body>
+</html>
