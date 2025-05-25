@@ -2,7 +2,8 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Video Call</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Group Video Call</title>
   <style>
     body {
       font-family: sans-serif;
@@ -46,14 +47,45 @@
       font-weight: bold;
       margin-top: 0.5rem;
     }
+    #user-list {
+      margin-top: 20px;
+      width: 300px;
+    }
+    #user-list div {
+      padding: 5px;
+      border: 1px solid #ccc;
+      margin-bottom: 5px;
+      display: flex;
+      align-items: center;
+    }
+    #user-list img {
+      width: 30px;
+      height: 30px;
+      margin-right: 10px;
+      border-radius: 50%;
+    }
+    #profile-setup {
+      margin-bottom: 1rem;
+    }
   </style>
 </head>
 <body>
 
-<h2>🎥 Video Call with Chat, Screen Sharing & Username</h2>
+<h2>🎥 Group Video</h2>
+
+<div id="profile-setup">
+  <h3>Set Up Your Profile</h3>
+  <input id="username" placeholder="Enter your username" required>
+  <br>
+  <input type="file" id="profile-image" accept="image/*">
+  <button onclick="setProfile()">Save Profile</button>
+  <br>
+  <input id="emoji-input" placeholder="Enter emoji or text (e.g. 😊)" />
+</div>
 
 <p>Your ID: <span id="my-id">...</span></p>
 <p>Your Username: <span id="my-username">...</span></p>
+<p>Your Profile Image: <span id="my-profile-image"></span></p>
 
 <input id="peer-id" placeholder="Enter peer ID to call">
 <button onclick="callPeer()">Call</button>
@@ -77,6 +109,12 @@
 
 <button onclick="shareScreen()">Share Screen</button>
 
+<h3>Connected Users:</h3>
+<div id="user-list"></div>
+
+<input type="file" id="video-file-input" accept="video/*" onchange="uploadVideo(event)" />
+<button onclick="stopVideo()">Stop Video</button>
+
 <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
 <script>
   const myVideo = document.getElementById('my-video');
@@ -85,25 +123,37 @@
   const peerIdInput = document.getElementById('peer-id');
   const messageInput = document.getElementById('message');
   const myUsernameDisplay = document.getElementById('my-username');
-  const peerUsernameDisplay = document.getElementById('peer-username');
-
+  const myProfileImageDisplay = document.getElementById('my-profile-image');
+  const userListDiv = document.getElementById('user-list');
+  const videoFileInput = document.getElementById('video-file-input');
+  
   let localStream;
   let currentCall;
   let conn;
   let peer;
   let myCustomId;
-  let myUsername;
+  let myUsername = '';
+  let myEmoji = '';
+  let myProfileImage = '';
   let peerUsername = "Peer";
   const maxRetries = 5;
 
-  // Ask for username on load
-  window.onload = () => {
-    myUsername = prompt("Enter your username:");
-    if (!myUsername) myUsername = "Anonymous";
-    myUsernameDisplay.textContent = myUsername;
-    createPeerWithRetry();
-  };
+  // Setup: Get user profile and set it
+  function setProfile() {
+    myUsername = document.getElementById('username').value || 'Anonymous';
+    myEmoji = document.getElementById('emoji-input').value || '😊';
+    myProfileImage = document.getElementById('profile-image').files[0] ? URL.createObjectURL(document.getElementById('profile-image').files[0]) : null;
+    localStorage.setItem('username', myUsername);
+    localStorage.setItem('emoji', myEmoji);
+    localStorage.setItem('profileImage', myProfileImage);
 
+    myUsernameDisplay.textContent = myUsername;
+    myProfileImageDisplay.textContent = myProfileImage ? 'Image Set' : 'No Image';
+
+    createPeerWithRetry();
+  }
+
+  // Generate a random ID and try to connect
   function createPeerWithRetry(retries = 0) {
     myCustomId = Math.floor(1000 + Math.random() * 9000).toString();
     peer = new Peer(myCustomId);
@@ -125,11 +175,13 @@
     });
   }
 
+  // Handle peer events like incoming calls and data connections
   function setupPeerEvents() {
     navigator.mediaDevices.getUserMedia({ video: true, audio: true })
       .then(stream => {
         localStream = stream;
         myVideo.srcObject = stream;
+        addUserToList(myUsername, myEmoji, myProfileImage);
       });
 
     peer.on('call', call => {
@@ -145,26 +197,22 @@
 
       conn.on('open', () => {
         console.log('Data connection opened (incoming)');
-        // Send our username to the peer
-        conn.send(JSON.stringify({ type: "username", name: myUsername }));
+        conn.send(JSON.stringify({ type: 'username', name: myUsername, emoji: myEmoji, profileImage: myProfileImage }));
       });
 
       conn.on('data', data => {
-        try {
-          const msg = JSON.parse(data);
-          if (msg.type === "username") {
-            peerUsername = msg.name;
-            peerUsernameDisplay.textContent = peerUsername;
-          } else if (msg.type === "chat") {
-            addMessage(`${peerUsername}: ${msg.text}`);
-          }
-        } catch (e) {
-          console.warn("Non-JSON data:", data);
+        const msg = JSON.parse(data);
+        if (msg.type === 'username') {
+          peerUsername = msg.name;
+          addUserToList(peerUsername, msg.emoji, msg.profileImage);
+        } else if (msg.type === 'chat') {
+          addMessage(`${peerUsername}: ${msg.text}`);
         }
       });
     });
   }
 
+  // Call another peer by ID
   function callPeer() {
     const id = peerIdInput.value;
 
@@ -172,20 +220,16 @@
 
     conn.on('open', () => {
       console.log('Data connection opened (outgoing)');
-      conn.send(JSON.stringify({ type: "username", name: myUsername }));
+      conn.send(JSON.stringify({ type: 'username', name: myUsername, emoji: myEmoji, profileImage: myProfileImage }));
     });
 
     conn.on('data', data => {
-      try {
-        const msg = JSON.parse(data);
-        if (msg.type === "username") {
-          peerUsername = msg.name;
-          peerUsernameDisplay.textContent = peerUsername;
-        } else if (msg.type === "chat") {
-          addMessage(`${peerUsername}: ${msg.text}`);
-        }
-      } catch (e) {
-        console.warn("Non-JSON data:", data);
+      const msg = JSON.parse(data);
+      if (msg.type === 'username') {
+        peerUsername = msg.name;
+        addUserToList(peerUsername, msg.emoji, msg.profileImage);
+      } else if (msg.type === 'chat') {
+        addMessage(`${peerUsername}: ${msg.text}`);
       }
     });
 
@@ -196,10 +240,11 @@
     currentCall = call;
   }
 
+  // Send chat message to the connected peer(s)
   function sendMessage() {
     const msg = messageInput.value;
     if (conn && conn.open) {
-      conn.send(JSON.stringify({ type: "chat", text: msg }));
+      conn.send(JSON.stringify({ type: 'chat', text: msg }));
       addMessage(`You: ${msg}`);
       messageInput.value = '';
     } else {
@@ -207,6 +252,7 @@
     }
   }
 
+  // Display chat message
   function addMessage(msg) {
     const div = document.createElement('div');
     div.textContent = msg;
@@ -214,6 +260,14 @@
     chatBox.scrollTop = chatBox.scrollHeight;
   }
 
+  // Add user to the user list
+  function addUserToList(username, emoji, profileImage) {
+    const div = document.createElement('div');
+    div.innerHTML = `<img src="${profileImage || 'https://via.placeholder.com/30'}" alt="profile"><strong>${username}</strong> ${emoji}`;
+    userListDiv.appendChild(div);
+  }
+
+  // Share screen
   function shareScreen() {
     navigator.mediaDevices.getDisplayMedia({ video: true })
       .then(screenStream => {
@@ -229,6 +283,30 @@
       .catch(err => {
         alert('Screen share failed: ' + err);
       });
+  }
+
+  // Upload a video file
+  function uploadVideo(event) {
+    const file = event.target.files[0];
+    if (file && file.type.startsWith('video/')) {
+      const videoURL = URL.createObjectURL(file);
+      const videoElement = document.createElement('video');
+      videoElement.src = videoURL;
+      videoElement.autoplay = true;
+      videoElement.muted = true;
+      videoElement.controls = true;
+      document.body.appendChild(videoElement);
+    } else {
+      alert('Please upload a valid video file.');
+    }
+  }
+
+  // Stop video
+  function stopVideo() {
+    if (localStream) {
+      localStream.getTracks().forEach(track => track.stop());
+      myVideo.srcObject = null;
+    }
   }
 </script>
 
